@@ -1,0 +1,19 @@
+{
+ "key0": "value0",
+ "key1": "value1",
+ "key3": {
+     "inner0": "value00",
+     "inner1": "value10",
+     "inner2": "value20"
+  },
+  "key4" : [
+    "list-item0",
+    "list-item2",
+    "list-item3",
+    {
+      "list-inner0": "value000",
+      "list-inner1": "value100",
+      "list-inner2": "value200"
+    }
+  ]
+}
