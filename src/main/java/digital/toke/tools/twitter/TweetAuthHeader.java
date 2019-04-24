@@ -19,14 +19,14 @@ import java.util.TreeMap;
  * @author daves
  *
  */
-public class TwitterOAuthHeader {
+public class TweetAuthHeader {
 	
 	private static final SecureRandom rand = new SecureRandom();
 	
 	String header;
 	 Map<String,String> collector;
 	
-	public TwitterOAuthHeader(String header, Map<String,String> collector) {
+	public TweetAuthHeader(String header, Map<String,String> collector) {
 		this.header = header;
 		this.collector = collector;
 	}
@@ -132,7 +132,7 @@ public class TwitterOAuthHeader {
 			collector.put(percentEncode(name), percentEncode(name));
 		}
 		
-		public TwitterOAuthHeader build() {
+		public TweetAuthHeader build() {
 			
 			// 1.0 addParameter will have added and percent encoded stuff like the status
 			
@@ -237,7 +237,7 @@ public class TwitterOAuthHeader {
 			buf.append("\"");
 			
 			
-			return new TwitterOAuthHeader(buf.toString(), collector);
+			return new TweetAuthHeader(buf.toString(), collector);
 			
 		}
 		
