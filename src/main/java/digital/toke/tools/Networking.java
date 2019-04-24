@@ -30,6 +30,7 @@ import okhttp3.Response;
 public class Networking {
 
 	public static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
+	public static final MediaType URLENCODED = MediaType.parse("application/x-www-form-urlencoded; charset=utf-8");
 	protected final Lock lock = new ReentrantLock();
 	protected final OkHttpClient client;
 	protected MWQCookieJar cookieJar;
@@ -162,7 +163,7 @@ public class Networking {
 	}
 	
 	
-	public Result post(String url, Headers headers, String json) throws IOException {
+	public Result post(MediaType type, String url, Headers headers, String json) throws IOException {
 		lock.lock();
 		
 		if(cookiePath != null) {
@@ -173,7 +174,7 @@ public class Networking {
 		}
 		
 		try {
-			RequestBody body = RequestBody.create(JSON, json);
+			RequestBody body = RequestBody.create(type, json);
 			Request request = new Request.Builder()
 					.url(url)
 					.post(body)
@@ -190,7 +191,7 @@ public class Networking {
 		}
 	}
 	
-	public Result put(String url, Headers headers, String json) throws IOException {
+	public Result put(MediaType type, String url, Headers headers, String json) throws IOException {
 		lock.lock();
 		
 		if(cookiePath != null) {
@@ -201,7 +202,7 @@ public class Networking {
 		}
 		
 		try {
-			RequestBody body = RequestBody.create(JSON, json);
+			RequestBody body = RequestBody.create(type, json);
 			Request request = new Request.Builder()
 					.url(url)
 					.put(body)

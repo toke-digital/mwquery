@@ -6,6 +6,7 @@ package digital.toke.tools;
 
 
 import java.io.File;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.Collection;
@@ -18,6 +19,9 @@ import com.jayway.jsonpath.JsonPath;
 
 import digital.toke.tools.CmdLineParser.OptionException;
 import okhttp3.Headers;
+import okhttp3.MediaType;
+
+import digital.toke.tools.Networking.*;
 
 public class Main {
 	
@@ -33,6 +37,8 @@ public class Main {
 		
 		// can be used multiple times
 		CmdLineParser.Option<String> headerOption = parser.addStringOption('h', "header");
+		
+		CmdLineParser.Option<String> mediaTypeOption = parser.addStringOption('m', "mediaType");
 		
 		// default is POST
 		CmdLineParser.Option<String> reqOption = parser.addStringOption('r', "request");
@@ -67,6 +73,13 @@ public class Main {
 		}
 		
 		final String req = parser.getOptionValue(reqOption, "GET");
+		final String mediaTypeString = parser.getOptionValue(mediaTypeOption, "JSON");
+		MediaType mediaType = null;
+		switch(mediaTypeString) {
+			case "JSON" : mediaType = Networking.JSON; break;
+			case "URLENCODED" : mediaType = Networking.URLENCODED; break;
+		}
+		
 		String url = parser.getOptionValue(urlOption, null);
 		
 		if(url == null) {
@@ -121,7 +134,7 @@ public class Main {
 			case "POST": {
 				
 				try {
-					Result r = net.post(url, _headers, data);
+					Result r = net.post(mediaType, url, _headers, data);
 					if(dump) {
 						System.err.println(r);
 						return;
@@ -159,7 +172,7 @@ public class Main {
             case "PUT": {
 				
 				try {
-					Result r = net.put(url, _headers, data);
+					Result r = net.put(mediaType, url, _headers, data);
 					if(dump) {
 						System.err.println(r);
 						return;
@@ -248,18 +261,19 @@ public class Main {
 	
 	private static void help() {
  		
- 		System.out.println("mwq, version 1.0.0");
+ 		System.out.println("mwquery, version 1.0.0");
  		System.out.println("Author: David R. Smith <dave.smith10@det.nsw.edu.au>");
  		System.out.println("");
  		System.out.println("Options:");
  		System.out.println("-r --request <val>         | GET|POST|PUT default is GET");
- 		System.out.println("-h --header <val>          | header, can be used multiple times");
+ 		System.out.println("-h --header <val>          | header, can be used multiple times, but see --mediaType");
+ 		System.out.println("-m --mediaType <val>       | Add appropriate header for post and put - values are JSON or URLENCODED, default is JSON");
  		System.out.println("-d --data <json> or @file  | data for the rest call");
  		System.out.println("-u --url <url>             | required, the url for the REST call");
  		System.out.println("-q --query <token=query>   | query is a jsonpath expression like 'token=$.token'");
  		System.out.println("--dump                     | dump the response to stderr");
  		System.out.println("-f --flatten               | flatten the json response and output it");
- 		System.out.println("-c --cookiePath <path>     | optional path to serialize cookies");
+ 		System.out.println("-c --cookiePath <path>     | optional path to serialize cookies. If set, client is cookie-aware (for stickyness)");
  		
 	
  	
