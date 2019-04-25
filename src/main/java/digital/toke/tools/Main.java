@@ -4,24 +4,39 @@
  */
 package digital.toke.tools;
 
-
 import java.io.File;
-
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.file.Files;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Properties;
 
 import com.jayway.jsonpath.Configuration;
 import com.jayway.jsonpath.JsonPath;
 
 import digital.toke.tools.CmdLineParser.OptionException;
+import digital.toke.tools.twitter.OAuthCompute;
 import okhttp3.Headers;
 import okhttp3.MediaType;
 
+/**
+ * Kind of like curl + jq
+ * 
+ * @author dave
+ *
+ */
 public class Main {
+	
+	private static String consumerKey, token, consumerSecret, tokenSecret;
 	
 	public static void main(String[] args) {
 		
@@ -38,10 +53,13 @@ public class Main {
 		
 		CmdLineParser.Option<String> mediaTypeOption = parser.addStringOption('m', "mediaType");
 		
+		// causes URL-encoding to be done in a way that OAuth likes
+		CmdLineParser.Option<Boolean> strictRFC3896Option = parser.addBooleanOption("strictRFC3896");
+		
 		// default is POST
 		CmdLineParser.Option<String> reqOption = parser.addStringOption('r', "request");
 		
-		// can be a json formatted string a file. use @file in that case
+		// use @file in that case of a file
 		CmdLineParser.Option<String> dataOption = parser.addStringOption('d', "data");
 		
 		CmdLineParser.Option<String> urlOption = parser.addStringOption('u', "url");
@@ -57,6 +75,8 @@ public class Main {
 		 * If set, attempt will be made to serialize cookies, allows for sticky sessions
 		 */
 		CmdLineParser.Option<String> cookiePathOption = parser.addStringOption('c', "cookiePath");
+		
+		CmdLineParser.Option<String> oauthOption = parser.addStringOption('o', "oauth");
 		
 		try {
 			parser.parse(args);
@@ -78,9 +98,12 @@ public class Main {
 			case "URLENCODED" : mediaType = Networking.URLENCODED; break;
 		}
 		
+		boolean strictRFC3896 = parser.getOptionValue(strictRFC3896Option, Boolean.FALSE);
+		
 		String url = parser.getOptionValue(urlOption, null);
 		
-		if(url == null) {
+		// url is required
+	   if(url == null) {
 			
 			if(parser.getRemainingArgs().length>0) {
 				url = parser.getRemainingArgs()[0];
@@ -92,11 +115,51 @@ public class Main {
 			return;
 		}
 		
+		// construct a base url and collect query params if found
+		URL urlObj = null;
+		try {
+			urlObj = new URL(url);
+		} catch (MalformedURLException e1) {
+			e1.printStackTrace();
+			return;
+		}
+		StringBuffer urlbuf = new StringBuffer();
+		urlbuf.append(urlObj.getProtocol());
+		urlbuf.append("://");
+		
+		// handle explicit/implicit port value
+		int port = urlObj.getPort();
+		if(url.contains(String.valueOf(port))) {
+			// if the port is explicit in the url string, keep it explicit
+			urlbuf.append(urlObj.getAuthority());
+		}else {
+			urlbuf.append(urlObj.getHost());
+		}
+		
+		urlbuf.append(urlObj.getPath());
+		String baseUrl = urlbuf.toString(); // should be protocol://host[:port]/path  but have no params
+		
+		// parameters found in the url are collected here, as we need this analysis for OAuth
+		Collection<String> parameters = new HashSet<String>();
+		String queryParams = urlObj.getQuery();
+		if(queryParams != null) {
+			if(queryParams.contains("&")) {
+			    String [] paramItems = queryParams.split("&");
+			    for(String p: paramItems) parameters.add(p);
+		    }else {
+		    	// apparently just one
+		    	parameters.add(queryParams);
+		    }
+		}
+		
 		final boolean dump = parser.getOptionValue(dumpOption, false);
 		final boolean flatten = parser.getOptionValue(flattenOption, false);
 		
+		// our collection of headers from the command line
 		Collection<String> headers = parser.getOptionValues(headerOption);
-		String data = parser.getOptionValue(dataOption);
+		
+		// parameters from file or json, etc
+		String data = parser.getOptionValue(dataOption, null);
 		if(data != null) {
 			if(data.startsWith("@")) {
 				File f = new File(data.substring(1));
@@ -112,148 +175,165 @@ public class Main {
 					e.printStackTrace();
 				}
 			}
+			
+			// so now data is loaded, if we are URLENCODED media type (for POST), assume it is name=value&name=value params. Collect and escape
+			// NOTE we are not yet handling multi-part mime encoded params!!!
+			
+			if(mediaType == Networking.URLENCODED) {
+				// collect the params for analysis (for example, OAuth)
+				queryParams = data;
+				if(queryParams != null) {
+					if(queryParams.contains("&")) {
+					    String [] paramItems = queryParams.split("&");
+					    for(String p: paramItems) parameters.add(p);
+				    }else {
+				    	// apparently just one
+				    	parameters.add(queryParams);
+				    }
+				}
+				
+				// finally, do URL encoding
+				if(strictRFC3896) {
+					data = URLUtil.percentEncode(data);
+				}else {
+				 // more typical encoding
+				  try {
+					data = URLEncoder.encode(data, "UTF-8");
+				  } catch (UnsupportedEncodingException e) {}
+				}
+			}
 		}
 		
 		String cookiePath = parser.getOptionValue(cookiePathOption);
 		
 		Networking net = new Networking();
 		if(cookiePath != null) net.setCookiePath(new File(cookiePath));
-		Map<String,String> map = new HashMap<String,String>();
+		Map<String,String> headerMap = new HashMap<String,String>();
+		
+		// get the headers out of the command line
 		Iterator<String> iter = headers.iterator(); 
 		while(iter.hasNext()) {
 			String item = iter.next();
 		    String [] items = item.split("\\:");
-		    map.put(items[0].trim(), items[1].trim());
+		    headerMap.put(items[0].trim(), items[1].trim());
+		}
+		
+		// See if we are doing oauth
+		String oauthConfig = parser.getOptionValue(oauthOption, null);
+		if(oauthConfig != null) {
+			InputStream in = null;
+			Properties props = new Properties();
+
+			try {
+				File config = new File(oauthConfig);
+				if (config.exists()) {
+					// external config file
+					in = new FileInputStream(config);
+				} else {
+					throw new RuntimeException("oauth config path does not appear to exist!");
+				}
+
+				props.load(in);
+			}catch(Exception x) {
+				x.printStackTrace();
+				return;
+			}
+				
+			// these oauth tokens are now in scope
+			consumerKey = props.getProperty("consumer_key",null);
+			consumerSecret = props.getProperty("consumer_secret",null);
+			token = props.getProperty("token",null);
+			tokenSecret = props.getProperty("token_secret",null);
+			
+			if(consumerKey == null || 
+				consumerSecret == null || 
+				token == null || 
+				tokenSecret == null) throw new RuntimeException("OAuth config failed, at least one required property is not set");
+			
+			OAuthCompute oac = OAuthCompute.builder(consumerKey, token)
+					.addParameters(parameters)
+					.consumerSecret(consumerSecret)
+					.oauthTokenSecret(tokenSecret)
+					.method(req)
+					.url(baseUrl)
+					.nonce()
+					.timestamp()
+					.signatureMethod()
+					.version()
+					.build();
+			
+			headerMap.put("Authorization", oac.getHeader());
+			
 		}
 	   
-		Headers _headers = Headers.of(map);
+		Headers _headers = Headers.of(headerMap);
 		
-		switch(req) {
-			case "POST": {
-				
-				try {
-					Result r = net.post(mediaType, url, _headers, data);
-					if(dump) {
-						System.err.println(r);
-						return;
-					}
-					
-					// check for flatten option and if requested, output flattened set of data
-					if(flatten) {
-						r.walk();
-					}
-					
-					// now do queries or bail if none
-					Collection<String> queries = parser.getOptionValues(queryOption);
-					if(queries.size() ==0) {
-						return;
-					}
-					Object document = Configuration.defaultConfiguration().jsonProvider().parse(r.data);
-					iter = queries.iterator(); 
-					while(iter.hasNext()) {
-						String item = iter.next();
-					    String [] items = item.split("=");
-					    String token = items[0].trim();
-					    String query = items[1].trim();
-					    String val = JsonPath.read(document, query);
-					    System.out.println(String.format("%s=\"%s\"", token,val));
-					    
-					}
-					
-				} catch (IOException e) {
-					e.printStackTrace();
+		Result result = null;
+		
+		try {
+			switch(req) {
+				case "POST": {
+					result = net.post(mediaType, url, _headers, data);
+					break;
 				}
 				
-				break;
-			}
-			
-            case "PUT": {
-				
-				try {
-					Result r = net.put(mediaType, url, _headers, data);
-					if(dump) {
-						System.err.println(r);
-						return;
-					}
-					
-					// check for flatten option and if requested, output flattened set of data
-					if(flatten) {
-						r.walk();
-					}
-					
-					// now do queries or bail if none
-					Collection<String> queries = parser.getOptionValues(queryOption);
-					if(queries.size() ==0) {
-						return;
-					}
-					Object document = Configuration.defaultConfiguration().jsonProvider().parse(r.data);
-					iter = queries.iterator(); 
-					while(iter.hasNext()) {
-						String item = iter.next();
-					    String [] items = item.split("=");
-					    String token = items[0].trim();
-					    String query = items[1].trim();
-					    String val = JsonPath.read(document, query);
-					    System.out.println(String.format("%s=\"%s\"", token,val));
-					    
-					}
-					
-				} catch (IOException e) {
-					e.printStackTrace();
+	            case "PUT": {
+					result = net.put(mediaType, url, _headers, data);
+					break;
 				}
 				
-				break;
-			}
-			
-			case "GET": {
-				
-				try {
-					Result r = net.get(url, _headers);
-					if(dump) {
-						System.err.println(r);
-						return;
-					}
-					
-					// check for flatten option and if requested, output flattened set of data
-					if(flatten) {
-						r.walk();
-					}
-					
-					
-					Collection<String> queries = parser.getOptionValues(queryOption);
-					if(queries.size() ==0) {
-						return;
-					}
-					Object document = Configuration.defaultConfiguration().jsonProvider().parse(r.data);
-					iter = queries.iterator(); 
-					while(iter.hasNext()) {
-						String item = iter.next();
-					    String [] items = item.split("=");
-					    String token = items[0].trim();
-					    String query = items[1].trim();
-					    String val = JsonPath.read(document, query);
-					    System.out.println(String.format("%s=%s", token,val));
-					    
-					}
-				} catch (IOException e) {
-					e.printStackTrace();
+				case "GET": {
+					result = net.get(url, _headers);
+					break;
 				}
-				break;
-			}
-			
-            case "HEAD": {
 				
-				try {
-					Result r = net.head(url, _headers);
-					// dumps the headers
-					System.out.println(r.data);
-				} catch (IOException e) {
-					e.printStackTrace();
+	            case "HEAD": {
+					
+					try {
+						result = net.head(url, _headers);
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
+					break;
 				}
-				break;
 			}
-
+		}catch(IOException x) {
+			x.printStackTrace();
+			return;
 		}
+			
+		// process Result	
+			
+			if(dump) {
+				System.err.println(result);
+				return;
+			}
+			
+			// check for flatten option for json and if requested, output flattened set of data
+			if(flatten) {
+				result.walk();
+			}
+			
+			// now do json queries or bail if none required
+			Collection<String> queries = parser.getOptionValues(queryOption);
+			if(queries.size() == 0) {
+				return;
+			}
+			Object document = Configuration.defaultConfiguration().jsonProvider().parse(result.data);
+			iter = queries.iterator(); 
+			while(iter.hasNext()) {
+				String item = iter.next();
+			    String [] items = item.split("=");
+			    String token = items[0].trim();
+			    String query = items[1].trim();
+			    String val = JsonPath.read(document, query);
+			    System.out.println(String.format("%s=\"%s\"", token,val));
+			    
+			}
+			
+	
+			
+			
 	}
 
 	
@@ -263,18 +343,17 @@ public class Main {
  		System.out.println("Author: David R. Smith <dave.smith10@det.nsw.edu.au>");
  		System.out.println("");
  		System.out.println("Options:");
- 		System.out.println("-r --request <val>         | GET|POST|PUT default is GET");
+ 		System.out.println("-r --request <val>         | GET|POST|PUT|HEAD default is GET");
  		System.out.println("-h --header <val>          | header, can be used multiple times, but see --mediaType");
- 		System.out.println("-m --mediaType <val>       | Add appropriate header for post and put - values are JSON or URLENCODED, default is JSON");
+ 		System.out.println("-m --mediaType <val>       | Add appropriate header for POST and PUT media type - values are JSON or URLENCODED, default is JSON");
+ 		System.out.println("--strictRFC3896            | Use with URLENCODED mediaType if required to control the url encoding");
  		System.out.println("-d --data <json> or @file  | data for the rest call");
  		System.out.println("-u --url <url>             | required, the url for the REST call");
  		System.out.println("-q --query <token=query>   | query is a jsonpath expression like 'token=$.token'");
- 		System.out.println("--dump                     | dump the response to stderr");
- 		System.out.println("-f --flatten               | flatten the json response and output it");
+ 		System.out.println("--dump                     | dump the response to stdout (useful for debugging)");
+ 		System.out.println("-f --flatten               | flatten the json response and output it as name=value pairs");
  		System.out.println("-c --cookiePath <path>     | optional path to serialize cookies. If set, client is cookie-aware (for stickyness)");
  		
-	
- 	
  		System.out.println("-x --help                  | Show this help");
  		System.out.println("");
  		
