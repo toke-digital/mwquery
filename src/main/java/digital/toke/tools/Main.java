@@ -350,6 +350,7 @@ public class Main {
 				
 				default: {
 				
+					System.out.println(String.format("%s=\"%s\"", token, String.valueOf(res)));
 					
 				}
 				}
