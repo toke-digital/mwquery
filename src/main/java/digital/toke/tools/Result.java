@@ -25,10 +25,21 @@ public class Result {
 	}
 
 	public String toString() {
-		if (data == null)
-			return "";
-		JSONObject obj = new JSONObject(data);
-		return obj.toString(4);
+		
+		if (data == null) return "";
+		
+		if(data.startsWith("[")) {
+			JSONArray array = new JSONArray(data);
+			return array.toString(4);
+		}else if(data.startsWith("{")) {
+			JSONObject obj = new JSONObject(data);
+			obj.toString(4);
+		}else {
+			return String.valueOf(data);
+		}
+		
+		return "";
+		
 	}
 	
 	public void walk() {

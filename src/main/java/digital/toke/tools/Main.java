@@ -8,23 +8,24 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.UnsupportedEncodingException;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.net.URLEncoder;
 import java.nio.file.Files;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
 import com.jayway.jsonpath.Configuration;
 import com.jayway.jsonpath.JsonPath;
+import com.jayway.jsonpath.TypeRef;
 
 import digital.toke.tools.CmdLineParser.OptionException;
 import digital.toke.tools.twitter.OAuthCompute;
+import net.minidev.json.JSONArray;
 import okhttp3.Headers;
 import okhttp3.MediaType;
 
@@ -56,6 +57,9 @@ public class Main {
 		// causes URL-encoding to be done in a way that OAuth likes
 		CmdLineParser.Option<Boolean> strictRFC3896Option = parser.addBooleanOption("strictRFC3896");
 		
+		// pass in location of OAuth configuration file.  
+		CmdLineParser.Option<String> oauthOption = parser.addStringOption('o', "oauth");
+		
 		// default is POST
 		CmdLineParser.Option<String> reqOption = parser.addStringOption('r', "request");
 		
@@ -76,7 +80,7 @@ public class Main {
 		 */
 		CmdLineParser.Option<String> cookiePathOption = parser.addStringOption('c', "cookiePath");
 		
-		CmdLineParser.Option<String> oauthOption = parser.addStringOption('o', "oauth");
+		
 		
 		try {
 			parser.parse(args);
@@ -91,7 +95,13 @@ public class Main {
 		}
 		
 		final String req = parser.getOptionValue(reqOption, "GET");
-		final String mediaTypeString = parser.getOptionValue(mediaTypeOption, "JSON");
+		
+		// path to oath config if required
+		String oauthConfig = parser.getOptionValue(oauthOption, null);
+		
+		// if using oauth, the default here is URLENCODED
+		String mediaTypeString = parser.getOptionValue(mediaTypeOption, oauthConfig == null ? "JSON" : "URLENCODED");
+		
 		MediaType mediaType = null;
 		switch(mediaTypeString) {
 			case "JSON" : mediaType = Networking.JSON; break;
@@ -104,14 +114,6 @@ public class Main {
 		
 		// url is required
 	   if(url == null) {
-			
-			if(parser.getRemainingArgs().length>0) {
-				url = parser.getRemainingArgs()[0];
-			}
-			
-			if(url == null) {
-				return;
-			}
 			return;
 		}
 		
@@ -140,17 +142,8 @@ public class Main {
 		String baseUrl = urlbuf.toString(); // should be protocol://host[:port]/path  but have no params
 		
 		// parameters found in the url are collected here, as we need this analysis for OAuth
-		Collection<String> parameters = new HashSet<String>();
-		String queryParams = urlObj.getQuery();
-		if(queryParams != null) {
-			if(queryParams.contains("&")) {
-			    String [] paramItems = queryParams.split("&");
-			    for(String p: paramItems) parameters.add(p);
-		    }else {
-		    	// apparently just one
-		    	parameters.add(queryParams);
-		    }
-		}
+		// don't mix this with the data flag contents
+		Collection<String> parameters = URLUtil.splitParams(urlObj.getQuery());
 		
 		final boolean dump = parser.getOptionValue(dumpOption, false);
 		final boolean flatten = parser.getOptionValue(flattenOption, false);
@@ -158,9 +151,12 @@ public class Main {
 		// our collection of headers from the command line
 		Collection<String> headers = parser.getOptionValues(headerOption);
 		
-		// parameters from file or json, etc
+		// parameters from file or the string which is going to be our body
 		String data = parser.getOptionValue(dataOption, null);
+		Collection<String> dataParams = new HashSet<String>();
+		
 		if(data != null) {
+			// load if required
 			if(data.startsWith("@")) {
 				File f = new File(data.substring(1));
 				if(!f.exists()) {
@@ -176,30 +172,28 @@ public class Main {
 				}
 			}
 			
-			// so now data is loaded, if we are URLENCODED media type (for POST), assume it is name=value&name=value params. Collect and escape
+			// so now data is loaded, if we are URLENCODED media type (for POST), assume it is name=value&name=value params. Collect and escape as required
 			// NOTE we are not yet handling multi-part mime encoded params!!!
 			
 			if(mediaType == Networking.URLENCODED) {
+
 				// collect the params for analysis (for example, OAuth)
-				queryParams = data;
-				if(queryParams != null) {
-					if(queryParams.contains("&")) {
-					    String [] paramItems = queryParams.split("&");
+				if(data != null) {
+					if(data.contains("&")) {
+					    String [] paramItems = data.split("&");
 					    for(String p: paramItems) parameters.add(p);
 				    }else {
 				    	// apparently just one
-				    	parameters.add(queryParams);
+				    	dataParams.add(data);
 				    }
 				}
 				
-				// finally, do URL encoding
 				if(strictRFC3896) {
-					data = URLUtil.percentEncode(data);
+					// for OAuth compliance
+					data = URLUtil.urlEncodeDataRFC3896(data);
 				}else {
 				 // more typical encoding
-				  try {
-					data = URLEncoder.encode(data, "UTF-8");
-				  } catch (UnsupportedEncodingException e) {}
+				 data = URLUtil.urlEncodeData(data);
 				}
 			}
 		}
@@ -219,7 +213,7 @@ public class Main {
 		}
 		
 		// See if we are doing oauth
-		String oauthConfig = parser.getOptionValue(oauthOption, null);
+		
 		if(oauthConfig != null) {
 			InputStream in = null;
 			Properties props = new Properties();
@@ -252,6 +246,7 @@ public class Main {
 			
 			OAuthCompute oac = OAuthCompute.builder(consumerKey, token)
 					.addParameters(parameters)
+					.addParameters(dataParams)
 					.consumerSecret(consumerSecret)
 					.oauthTokenSecret(tokenSecret)
 					.method(req)
@@ -305,7 +300,7 @@ public class Main {
 		// process Result	
 			
 			if(dump) {
-				System.err.println(result);
+				System.out.println(result);
 				return;
 			}
 			
@@ -319,15 +314,47 @@ public class Main {
 			if(queries.size() == 0) {
 				return;
 			}
+			
+			// if queries, assume json is in the result.data
 			Object document = Configuration.defaultConfiguration().jsonProvider().parse(result.data);
+
 			iter = queries.iterator(); 
 			while(iter.hasNext()) {
 				String item = iter.next();
-			    String [] items = item.split("=");
-			    String token = items[0].trim();
-			    String query = items[1].trim();
-			    String val = JsonPath.read(document, query);
-			    System.out.println(String.format("%s=\"%s\"", token,val));
+				if(!item.contains("=")) throw new RuntimeException("a query is specified as name=<some jsonpath>");
+				
+				String [] items = item.split("=");
+				String token = items[0].trim();
+				String query = items[1].trim();
+				
+				Object res = JsonPath.read(document, query);
+				switch(res.getClass().getSimpleName()) {
+				case "JSONArray": {
+				    JSONArray array = (JSONArray) res;
+				 
+				   int sz = array.size();
+				   if(sz == 1) {
+					   System.out.println(String.format("%s=\"%s\"", token, String.valueOf(array.get(0))));
+				   }else {
+				    for(int i = 0; i<sz; i++) {
+				    	Object str = array.get(i);
+				    	System.out.println(String.format("%s.%s=\"%s\"", token, String.valueOf(i), String.valueOf(str)));
+				    }
+				   }
+					break;
+				}
+				case "String": {
+					System.out.println(String.format("%s=\"%s\"", token, String.valueOf(res)));
+					break;
+				}
+				
+				default: {
+				
+					
+				}
+				}
+			   
+			  //  System.out.println(String.format("%s=\"%s\"", token,val));
 			    
 			}
 			
@@ -347,6 +374,7 @@ public class Main {
  		System.out.println("-h --header <val>          | header, can be used multiple times, but see --mediaType");
  		System.out.println("-m --mediaType <val>       | Add appropriate header for POST and PUT media type - values are JSON or URLENCODED, default is JSON");
  		System.out.println("--strictRFC3896            | Use with URLENCODED mediaType if required to control the url encoding");
+ 		System.out.println("-o --oauth <path>          | enable OAuth, <path> is properties file with consumer_key, token, consumer_secret, and token_secret defined");
  		System.out.println("-d --data <json> or @file  | data for the rest call");
  		System.out.println("-u --url <url>             | required, the url for the REST call");
  		System.out.println("-q --query <token=query>   | query is a jsonpath expression like 'token=$.token'");
