@@ -12,6 +12,8 @@ import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 
+import okhttp3.Headers;
+
 public class ResultTest {
 
 	@Test
@@ -24,7 +26,8 @@ public class ResultTest {
 			StringBuffer buf = new StringBuffer();
 			Stream<String> stream = reader.lines();
 			stream.forEachOrdered(item -> buf.append(item+'\n'));
-			Result r = new Result(200, true, buf.toString());
+			Headers headers = new Headers.Builder().add("Content-Type", "application/json").build();
+			Result r = new Result(headers, 200, true, buf.toString());
 			r.walk();
 			
 		    

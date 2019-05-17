@@ -9,19 +9,42 @@ import java.util.Iterator;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import okhttp3.Headers;
+import okhttp3.MediaType;
+
 public class Result {
 
+	Headers responseHeaders;
 	int code;
 	boolean success;
 	String data;
 	StringBuffer buf;
 	
-	public Result(int code, boolean success, String data) {
+	MediaType contentType; // can be null
+	
+	public Result(Headers responseHeaders, int code, boolean success, String data) {
 		super();
+		this.responseHeaders = responseHeaders;
 		this.code = code;
 		this.success = success;
 		if(data != null) this.data = data.trim();
 		else data = null;
+		setContentType(responseHeaders);
+	}
+	
+	private void setContentType(Headers headers) {
+		// can be null
+		String header = responseHeaders.get("Content-Type");
+		if(header != null) contentType = MediaType.parse(header);
+	}
+
+	/**
+	 * Can be null if there was no such header in the response
+	 * 
+	 * @return
+	 */
+	public MediaType getContentType() {
+		return contentType;
 	}
 
 	public String toString() {

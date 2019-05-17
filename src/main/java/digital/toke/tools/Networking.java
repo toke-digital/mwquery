@@ -22,15 +22,18 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 /**
- * Our networking functions. Cookies will be serialized and re-applied if cookiePath is non-null. 
+ * Our networking functions. Cookies will be serialized and re-applied in requests if cookiePath is non-null. 
  * 
  * @author David R. Smith 
  *
  */
 public class Networking {
 
+	// these are used for defining post bodies
 	public static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 	public static final MediaType URLENCODED = MediaType.parse("application/x-www-form-urlencoded; charset=utf-8");
+	
+	
 	protected final Lock lock = new ReentrantLock();
 	protected final OkHttpClient client;
 	protected MWQCookieJar cookieJar;
@@ -59,7 +62,7 @@ public class Networking {
 		return false;
 	}
 	
-	public Result get(String url, Headers headers) throws IOException {
+	public Result get(String url, Headers requestHeaders) throws IOException {
 		lock.lock();
 		
 		if(cookiePath != null) {
@@ -73,29 +76,30 @@ public class Networking {
 			
 			Request request = null;
 			
-			if(headers == null || headers.size() == 0) {
+			if(requestHeaders == null || requestHeaders.size() == 0) {
 				request = new Request.Builder()
 						.url(url)
 						.build();
 			}else {
 				request = new Request.Builder()
 						.url(url)
-						.headers(headers)
+						.headers(requestHeaders)
 						.build();
 			}
 			
-			int code; boolean success; String result;
+			int code; boolean success; String result; Headers responseHeaders;
 			try (Response response = client.newCall(request).execute()){
-				 result = response.body().string();
-				 code = response.code();
-				 success = response.isSuccessful();
+				responseHeaders = response.headers();
+				result = response.body().string();
+				code = response.code();
+				success = response.isSuccessful();
 			}
 			
 			if(cookiePath != null) {
 				cookieJar.writeCookies(cookiePath);
 			}
 			
-			return new Result(code, success, result);
+			return new Result(responseHeaders, code, success, result);
 			
 		} finally {
 			lock.unlock();
@@ -129,14 +133,14 @@ public class Networking {
 						.build();
 			}
 			
-			int code; boolean success;
+			int code; boolean success; Headers responseHeaders;
 			StringBuffer buf = new StringBuffer();
 			try (Response response = client.newCall(request).execute()){
 				
 				 code = response.code();
 				 success = response.isSuccessful();
 				
-				Headers responseHeaders = response.headers();
+				responseHeaders = response.headers();
 				Iterator<String> iter = responseHeaders.names().iterator();
 				while(iter.hasNext()) {
 					String name = iter.next();
@@ -155,7 +159,7 @@ public class Networking {
 				cookieJar.writeCookies(cookiePath);
 			}
 			
-			return new Result(code, success, buf.toString());
+			return new Result(responseHeaders, code, success, buf.toString());
 			
 		} finally {
 			lock.unlock();
@@ -184,7 +188,7 @@ public class Networking {
 				if(cookiePath != null) {
 					cookieJar.writeCookies(cookiePath);
 				}
-				return new Result(response.code(), response.isSuccessful(), response.body().string());
+				return new Result(response.headers(), response.code(), response.isSuccessful(), response.body().string());
 			}
 		} finally {
 			lock.unlock();
@@ -212,7 +216,7 @@ public class Networking {
 				if(cookiePath != null) {
 					cookieJar.writeCookies(cookiePath);
 				}
-				return new Result(response.code(), response.isSuccessful(), response.body().string());
+				return new Result(response.headers(), response.code(), response.isSuccessful(), response.body().string());
 			}
 		} finally {
 			lock.unlock();

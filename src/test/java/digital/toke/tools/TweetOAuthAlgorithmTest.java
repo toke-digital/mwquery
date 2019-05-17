@@ -7,13 +7,7 @@ import digital.toke.tools.twitter.OAuthCompute;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 
-public class TweetTest {
-	
-	
-	@Test
-	public void test1() {
-		
-	}
+public class TweetOAuthAlgorithmTest {
 
 	@Test
 	public void test0() {
@@ -21,7 +15,7 @@ public class TweetTest {
 		
 		// these are all published test values from dev.twitter.com
 		// https://developer.twitter.com/en/docs/basics/authentication/guides/creating-a-signature.html
-		// note that the final header example signature value is apparently wrong... ;-)
+		// note that the final header example signature value is apparently wrong in the doco... ;-)
 		
 		String consumerKey = "xvz1evFS4wEEPTGEFPHBog";
 		String token = "370773112-GmHxMAgYyLbNEtIKZeRNFsMKPR9EyMZeS9weJAEb";
