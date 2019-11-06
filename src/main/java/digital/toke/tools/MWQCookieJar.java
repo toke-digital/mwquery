@@ -71,6 +71,7 @@ public class MWQCookieJar implements CookieJar {
 		String json = root.toString(2);
 		try {
 			Files.write(file.toPath(), json.getBytes(StandardCharsets.UTF_8));
+			System.err.println(json);
 		} catch (IOException e) {
 			e.printStackTrace();
 		}

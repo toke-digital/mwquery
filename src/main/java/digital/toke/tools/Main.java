@@ -11,17 +11,16 @@ import java.io.InputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
 import com.jayway.jsonpath.Configuration;
 import com.jayway.jsonpath.JsonPath;
-import com.jayway.jsonpath.TypeRef;
 
 import digital.toke.tools.CmdLineParser.OptionException;
 import digital.toke.tools.twitter.OAuthCompute;
@@ -36,6 +35,8 @@ import okhttp3.MediaType;
  *
  */
 public class Main {
+	
+	public static HashMap<String,String> results;
 
 	private static String consumerKey, token, consumerSecret, tokenSecret;
 
@@ -73,8 +74,11 @@ public class Main {
 		CmdLineParser.Option<String> queryOption = parser.addStringOption('q', "query");
 
 		CmdLineParser.Option<Boolean> dumpOption = parser.addBooleanOption("dump");
+		
+		CmdLineParser.Option<Boolean> loggingOption = parser.addBooleanOption("logging");
 
 		CmdLineParser.Option<Boolean> flattenOption = parser.addBooleanOption('f', "flatten");
+		CmdLineParser.Option<Boolean> timeOption = parser.addBooleanOption('t', "time");
 
 		/**
 		 * If set, attempt will be made to serialize cookies, allows for sticky sessions
@@ -92,6 +96,9 @@ public class Main {
 			help();
 			return;
 		}
+		
+		final boolean time = parser.getOptionValue(timeOption, false);
+	
 
 		final String req = parser.getOptionValue(reqOption, "GET");
 
@@ -150,10 +157,12 @@ public class Main {
 		Collection<String> parameters = URLUtil.splitParams(urlObj.getQuery());
 
 		final boolean dump = parser.getOptionValue(dumpOption, false);
+		final boolean logging = parser.getOptionValue(loggingOption, false);
 		final boolean flatten = parser.getOptionValue(flattenOption, false);
 
 		// our collection of headers from the command line
 		Collection<String> headers = parser.getOptionValues(headerOption);
+		headers = variableSubstitution(headers,results);
 
 		// parameters from file or the string which is going to be our body
 		String data = parser.getOptionValue(dataOption, null);
@@ -207,7 +216,12 @@ public class Main {
 
 		String cookiePath = parser.getOptionValue(cookiePathOption);
 
-		Networking net = new Networking();
+		Networking net = null;
+		if(logging) {
+			net = new Networking(true);
+		}else {
+		    net = new Networking();
+		}
 		if (cookiePath != null)
 			net.setCookiePath(new File(cookiePath));
 		Map<String, String> headerMap = new HashMap<String, String>();
@@ -298,7 +312,6 @@ public class Main {
 
 		if (dump) {
 			System.out.println(result);
-			return;
 		}
 
 		// check for flatten option for json and if requested, output flattened set of
@@ -382,23 +395,50 @@ public class Main {
 		System.out.println("Options:");
 		System.out.println("-r --request <val>         | GET|POST|PUT|HEAD default is GET");
 		System.out.println("-h --header <val>          | header, can be used multiple times, but see --mediaType");
-		System.out.println(
-				"-m --mediaType <val>       | Add appropriate header for POST and PUT media type - values are JSON or URLENCODED, default is JSON");
-		System.out.println(
-				"--strictRFC3896            | Use with URLENCODED mediaType if required to control the url encoding");
-		System.out.println(
-				"-o --oauth <path>          | enable OAuth, <path> is properties file with consumer_key, token, consumer_secret, and token_secret defined");
+		System.out.println("-m --mediaType <val>       | Add appropriate header for POST and PUT media type - values are JSON or URLENCODED, default is JSON");
+		System.out.println("--strictRFC3896            | Use with URLENCODED mediaType if required to control the url encoding");
+		System.out.println("-o --oauth <path>          | enable OAuth, <path> is properties file with consumer_key, token, consumer_secret, and token_secret defined");
 		System.out.println("-d --data <json> or @file  | data for the rest call");
 		System.out.println("-u --url <url>             | required, the url for the REST call");
 		System.out.println("-q --query <token=query>   | query is a jsonpath expression like 'token=$.token'");
 		System.out.println("--dump                     | dump the response to stdout (useful for debugging)");
 		System.out.println("-f --flatten               | flatten the json response and output it as name=value pairs");
-		System.out.println(
-				"-c --cookiePath <path>     | optional path to serialize cookies. If set, client is cookie-aware (for stickyness)");
-
+		System.out.println("-c --cookiePath <path>     | optional path to serialize cookies. If set, client is cookie-aware (for stickyness)");
+		
+		System.out.println("--logging                  | turns on body level http logging");
+		
 		System.out.println("-x --help                  | Show this help");
 		System.out.println("");
 
+	}
+	
+	private static Collection<String> variableSubstitution(Collection<String> headers, HashMap<String,String> results) {
+		
+		if(results == null || results.isEmpty()) return headers;
+		
+		Collection<String> retVal = new ArrayList<String>();
+		
+		Iterator<String> iter = headers.iterator();
+		while(iter.hasNext()) {
+			String header = iter.next();
+			boolean found = false;
+			for(Object key: results.keySet()) {
+				String k = String.valueOf(key);
+				if(header.contains(k)) {
+					String val = results.get(k);
+					if(val.startsWith("\"")) val = val.substring(1,val.length()-1);
+					retVal.add(header.replaceAll(k, val));
+					found = true;
+				}
+			}
+			if(!found) {
+				retVal.add(header);
+			}
+			found = false;
+			
+		}
+		
+		return retVal;
 	}
 
 }

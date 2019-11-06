@@ -20,6 +20,8 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
+import okhttp3.logging.HttpLoggingInterceptor;
+import okhttp3.logging.HttpLoggingInterceptor.Level;
 
 /**
  * Our networking functions. Cookies will be serialized and re-applied in requests if cookiePath is non-null. 
@@ -42,6 +44,19 @@ public class Networking {
 	public Networking() {
 		cookieJar = new MWQCookieJar();
 		client = new OkHttpClient().newBuilder().cookieJar(cookieJar).build();
+		
+	}
+	
+	public Networking(boolean loggingOn) {
+		cookieJar = new MWQCookieJar();
+		if(loggingOn) {
+			HttpLoggingInterceptor logging = new HttpLoggingInterceptor();
+			logging.setLevel(Level.BASIC);
+			client = new OkHttpClient().newBuilder().cookieJar(cookieJar).addInterceptor(logging).build();
+		}else {
+			client = new OkHttpClient().newBuilder().cookieJar(cookieJar).build();
+		}
+		
 	}
 	
 	public boolean pingHost(String host, int port, int timeout) {

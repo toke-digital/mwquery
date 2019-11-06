@@ -4,6 +4,7 @@
  */
 package digital.toke.tools;
 
+import java.util.HashMap;
 import java.util.Iterator;
 
 import org.json.JSONArray;
@@ -19,6 +20,7 @@ public class Result {
 	boolean success;
 	String data;
 	StringBuffer buf;
+	public HashMap<String,String> results;
 	
 	MediaType contentType; // can be null
 	
@@ -30,6 +32,7 @@ public class Result {
 		if(data != null) this.data = data.trim();
 		else data = null;
 		setContentType(responseHeaders);
+		results = new HashMap<String,String>();
 	}
 	
 	private void setContentType(Headers headers) {
@@ -46,24 +49,6 @@ public class Result {
 	public MediaType getContentType() {
 		return contentType;
 	}
-
-	public String toString() {
-		
-		if (data == null) return "";
-		
-		if(data.startsWith("[")) {
-			JSONArray array = new JSONArray(data);
-			return array.toString(4);
-		}else if(data.startsWith("{")) {
-			JSONObject obj = new JSONObject(data);
-			obj.toString(4);
-		}else {
-			return String.valueOf(data);
-		}
-		
-		return "";
-		
-	}
 	
 	public void walk() {
 		
@@ -72,14 +57,14 @@ public class Result {
 		if(data == null || data.isEmpty()) return;
 		if(data.startsWith("[")) {
 			JSONArray array = new JSONArray(data);
-			walk(array);
+			emitToSTDOut(array);
 		}else if(data.startsWith("{")) {
 			JSONObject obj = new JSONObject(data);
-			walk(obj);
+			emitToSTDOut(obj);
 		}
 	}
 
-	public void walk(Object obj) {
+	public void emitToSTDOut(Object obj) {
 
 		switch (obj.getClass().getName()) {
 			case "org.json.JSONObject": {
@@ -90,7 +75,7 @@ public class Result {
 					String key = keys.next();
 					String dotKey = "."+key;
 					buf.append(dotKey);
-					walk(item.get(key));
+					emitToSTDOut(item.get(key));
 					buf.delete(buf.length()-dotKey.length(),buf.length());
 				}
 				break;
@@ -104,7 +89,7 @@ public class Result {
 					Object o = iter.next();
 					String dotIndex = "."+i;
 					buf.append(dotIndex);
-					walk(o);
+					emitToSTDOut(o);
 					buf.delete(buf.length()-dotIndex.length(),buf.length());
 					i++;
 				}
@@ -124,10 +109,17 @@ public class Result {
 				
 				System.out.print(bufPre);
 				System.out.println(end.toString());
-				
-				
+				results.put(bufPre, String.valueOf(obj));
 			}
 		}
 	}
+
+	@Override
+	public String toString() {
+		return "Result [responseHeaders=" + responseHeaders + ", code=" + code + ", success=" + success + ", data="
+				+ data + ", buf=" + buf + ", results=" + results + ", contentType=" + contentType + "]";
+	}
+	
+	
 
 }
